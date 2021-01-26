@@ -29,7 +29,11 @@ import java.io.StringReader;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 
 
 /**
@@ -625,6 +629,718 @@ public class XML {
         }
         return toJSONObject(reader, XMLParserConfiguration.ORIGINAL);
     }
+/**
+     * Find a JSONObject pointed to by a JSONPointer inside a well-formed 
+     * (but not necessarily valid) XML, replace it with the replacement
+     * JSONObject and return the whole XML as a JSONObject
+     * Some information may be lost in this transformation because
+     * JSON is a data format and XML is a document format. XML uses elements,
+     * attributes, and content text, while JSON uses unordered collections of
+     * name/value pairs and arrays of values. JSON does not does not like to
+     * distinguish between elements and attributes. Sequences of similar
+     * elements are represented as JSONArrays. Content text may be placed in a
+     * "content" member. Comments, prologs, DTDs, and <pre>{@code
+     * &lt;[ [ ]]>}</pre>
+     * are ignored.
+     *
+     * All values are converted as strings, for 1, 01, 29.0 will not be coerced to
+     * numbers but will instead be the exact value as seen in the XML document.
+     *
+     * @param reader The XML source reader.
+     * @param path A JSONPointer path, representing the JSONObject to be extracted
+     * from the xml file
+     * @return A JSONObject containing the structured data from the XML file.
+     * @throws JSONException Thrown if there is an errors while parsing the string
+     */
+    public static JSONObject toJSONObject (Reader reader, JSONPointer path, JSONObject replacement){
+        XMLParserConfiguration config = XMLParserConfiguration.ORIGINAL;
+        List<String> pointerList = new ArrayList<String>();
+        String [] pathStr;
+        if (path.toString().equals("/")){
+            pathStr = new String[0];
+        }else{
+            pathStr = path.toString().split("/");
+        }
+        // path should start with "/"
+        if (pathStr.length >0 && !pathStr[0].equals("")){
+            throw new JSONPointerException("Incorrectly formed JSON Pointer");
+        }
+
+        if (pathStr.length==0){
+            if (!path.toString().equals("/")){
+                throw new JSONPointerException("Incorrectly formed JSON Pointer");
+            }
+        }
+        // start from second string because first should be empty because path should have started with "/"
+        for (int i=1; i<pathStr.length; i++){
+            pointerList.add(pathStr[i]); // add ea
+        }
+
+        JSONObject jo = new JSONObject();
+        XMLTokener x = new XMLTokener(reader);
+        boolean skipSaving = false; // don't skip saving
+        int recursionLevel = -1;
+        // keep looking only while jo has nothing in it.
+        // once jo has something, its time to return
+        while (x.more() && jo.length()==0) {
+            x.skipPast("<");
+            if(x.more()) {
+                parseReplaceSubObject(x, jo, null, config, pointerList, skipSaving, recursionLevel, replacement);
+            }
+        }
+        return jo;
+    }
+
+    /*
+    * parseReplaceSubObject().
+    */
+    private static boolean parseReplaceSubObject(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, List<String> pointerList, boolean skipSaving, int recursionLevel, JSONObject replacement)
+    throws JSONException {
+char c;
+int i;
+JSONObject jsonObject = null;
+String string;
+String tagName;
+Object token;
+XMLXsiTypeConverter<?> xmlXsiTypeConverter;
+String topPointer; // pointer token at the top of the pointerList
+List<String> newPointerList; // new pointer list to pass on to the next level of recursion
+
+// Test for and skip past these forms:
+// <!-- ... -->
+// <! ... >
+// <![ ... ]]>
+// <? ... ?>
+// Report errors for these forms:
+// <>
+// <=
+// <<
+
+token = x.nextToken();
+
+// <!
+
+if (token == BANG) {
+    c = x.next();
+    if (c == '-') {
+        if (x.next() == '-') {
+            x.skipPast("-->");
+            return false;
+        }
+        x.back();
+    } else if (c == '[') {
+        token = x.nextToken();
+        if ("CDATA".equals(token)) {
+            if (x.next() == '[') {
+                if (!skipSaving){
+                    string = x.nextCDATA();
+                    if (string.length() > 0) {
+                        context.accumulate(config.getcDataTagName(), string);
+                    }
+                }
+                return false;
+            }
+        }
+        throw x.syntaxError("Expected 'CDATA['");
+    }
+    i = 1;
+    do {
+        token = x.nextMeta();
+        if (token == null) {
+            throw x.syntaxError("Missing '>' after '<!'.");
+        } else if (token == LT) {
+            i += 1;
+        } else if (token == GT) {
+            i -= 1;
+        }
+    } while (i > 0);
+    return false;
+} else if (token == QUEST) {
+
+    // <?
+    x.skipPast("?>");
+    return false;
+} else if (token == SLASH) {
+
+    // Close tag </
+
+    token = x.nextToken();
+    if (name == null) {
+        throw x.syntaxError("Mismatched close tag " + token);
+    }
+    if (!token.equals(name)) {
+        throw x.syntaxError("Mismatched " + name + " and " + token);
+    }
+    if (x.nextToken() != GT) {
+        throw x.syntaxError("Misshaped close tag");
+    }
+    return true;
+
+} else if (token instanceof Character) {
+    throw x.syntaxError("Misshaped tag");
+
+    // Open tag <
+
+} else {
+    tagName = (String) token;
+    token = null;
+    jsonObject = new JSONObject();
+    boolean nilAttributeFound = false;
+    xmlXsiTypeConverter = null;
+    
+    //new logic to check if pointerList has any matches
+    newPointerList = new ArrayList<String>(); // initialize empty new pointer list
+        // copy the modified pointerList to newPointerList
+    newPointerList.addAll(pointerList); 
+
+    // check if pointerList is already null then we should be getting recursionLevel of 0
+    if (pointerList.isEmpty()){
+        recursionLevel = 0;
+    }
+
+    if (!newPointerList.isEmpty() && tagName.equals(newPointerList.get(0)))
+    {
+        // we are on the right tag
+        topPointer = newPointerList.get(0);
+        // check case where a next pointer exists that is integer. In this case, don't remove this pointer instead
+        // decrement the next integer pointer and keep looking. Otherwise remove this top pointer
+        if (newPointerList.size()>1 && (newPointerList.get(1).matches("[0-9]+"))){
+            // second pointer is integer. check if it is zero, then we have found the topPointer and the zeroth value
+            // if more than 0, then we keep looking and decrement
+            if (Integer.parseInt(newPointerList.get(1))>0){
+                // decrement my own pointer. newPointer doesen't have a meaning as any downstream recursion is 
+                // useless for us so we don't decrement it.
+                pointerList.set(1,String.valueOf(Integer.parseInt(pointerList.get(1))-1));
+            }// check if integer value is 0 and not negative i.e. the zeroth value hasn't already passed
+            else {
+                //we have found zeroth element of an array with key = topPointer. safe to remove both pointers 
+                // iff we don't have an existing context which would mean we have already found the desired subObject
+                if (context.length()==0){
+                    newPointerList.remove(1); //safe to remove the integer next pointer
+                    newPointerList.remove(0); // safe to remove the top pointer
+                }else{
+                    // we don't have to find another JSONObject as two integer indices cannot occur one after another in xml
+                }
+            }
+        }else{
+            //next pointer is not an integer. can safetly remove the top pointer
+            newPointerList.remove(0); 
+        }
+    }
+
+    // check if pointerList has become empty due to the above code or we inherited it empty
+    if (newPointerList.isEmpty()){
+        //we should start saving the jsonObject from here
+        //skipSaving = false;
+        // when the pointerList becomes empty the first time, recursionLevel=0. We will stop saving when we return to 
+        // recursionLevel=0
+        recursionLevel +=1; 
+    }
+
+    for (;;) {
+        if (token == null) {
+            token = x.nextToken();
+        }
+        // attribute = value
+        if (token instanceof String) {
+            string = (String) token;
+            token = x.nextToken();
+            if (token == EQ) {
+                token = x.nextToken();
+                if (!(token instanceof String)) {
+                    throw x.syntaxError("Missing value");
+                }
+
+                if (config.isConvertNilAttributeToNull()
+                        && NULL_ATTR.equals(string)
+                        && Boolean.parseBoolean((String) token)) {
+                    nilAttributeFound = true;
+                } else if(config.getXsiTypeMap() != null && !config.getXsiTypeMap().isEmpty()
+                        && TYPE_ATTR.equals(string)) {
+                    xmlXsiTypeConverter = config.getXsiTypeMap().get(token);
+                } else if (!nilAttributeFound) {
+                    if (!skipSaving){
+                        jsonObject.accumulate(string,
+                        config.isKeepStrings()
+                                ? ((String) token)
+                                : stringToValue((String) token));
+                    }
+                }
+                token = null;
+            } else {
+                if (!skipSaving){
+                    jsonObject.accumulate(string, "");
+                }
+            }
+
+
+        } else if (token == SLASH) {
+            // Empty tag <.../>
+            if (x.nextToken() != GT) {
+                throw x.syntaxError("Misshaped tag");
+            }
+            if (!skipSaving){
+                if (nilAttributeFound) {
+                    context.accumulate(tagName, JSONObject.NULL);
+                } else if (jsonObject.length() > 0) {
+                    context.accumulate(tagName, jsonObject);
+                } else {
+                    context.accumulate(tagName, "");
+                }    
+            }else{
+                // do nothing. pointerList not yet empty
+            }
+            return false;
+
+        } else if (token == GT) {
+            // Content, between <...> and </...>
+            for (;;) {
+                token = x.nextContent();
+                if (token == null) {
+                    if (tagName != null) {
+                        throw x.syntaxError("Unclosed tag " + tagName);
+                    }
+                    return false;
+                } else if (token instanceof String) {
+                    string = (String) token;
+                    // if pointerList is empty, then only add to json otherwise skip adding, we're not 
+                    // at the desired subObject yet
+                    if (!skipSaving){
+                        if (string.length() > 0) {
+                            if(xmlXsiTypeConverter != null) {
+                                jsonObject.accumulate(config.getcDataTagName(),
+                                        stringToValue(string, xmlXsiTypeConverter));
+                            } else {
+                                jsonObject.accumulate(config.getcDataTagName(),
+                                        config.isKeepStrings() ? string : stringToValue(string));
+                            }
+                        }
+                    }else{
+                        // still not found desired subObject. Let the loop continue and finish this tag
+                    }
+                } else if (token == LT) {
+                    // Nested element
+
+                    // if we are at recursion ==0 then try to skip until this tag closes and actually 
+                    boolean returnedFlag = false;
+                    if (recursionLevel ==1){
+                        // we were given a call with "/"
+                        // just replace context with replacement
+                        Iterator<String> it = replacement.keys();
+                            context.clear(); // clear anything in context
+                            while (it.hasNext()){
+                                String key = it.next();
+                                context.put(key, replacement.get(key));
+                            }
+                            x.skipPast("/"+tagName+">"); // skip until recursion=0 tag has ended
+                            return false;
+                    }
+                    else if (recursionLevel ==0){
+                        jsonObject = replacement;
+                        x.skipPast("/"+tagName+">"); // skip until recursion=0 tag has ended
+                        returnedFlag = true; // okay to save
+                    }else{
+                        returnedFlag = parseReplaceSubObject(x, jsonObject, tagName, config, newPointerList, skipSaving, recursionLevel, replacement);
+                    }
+                    // call with updated newPointerList. This way on returning we maintain the original pointerList
+                    if (returnedFlag) {
+                        // Either the pointerList  or while we are still building the subObject,
+                        // keep returning up the recursion
+                        if (true){
+                             
+                            if (jsonObject.length() == 0) {
+                                context.accumulate(tagName, "");
+                            } else if (jsonObject.length() == 1
+                                    && jsonObject.opt(config.getcDataTagName()) != null) {
+                                context.accumulate(tagName, jsonObject.opt(config.getcDataTagName()));
+                            } else {
+                                context.accumulate(tagName, jsonObject);
+                            } 
+                            
+                        }else{
+                            // let's try if this works. I want upstream context to just pass through the underlying jsonObject
+                            // because  I don't want any more tags be added.
+                            // I'll try to copy jsonObject into context
+                            Iterator<String> it = jsonObject.keys();
+                            context.clear(); // clear anything in context
+                            while (it.hasNext()){
+                                String key = it.next();
+                                context.put(key, jsonObject.get(key));
+                            }
+                            // if you have data in context, and you're not in recursion >0 then you can go forward
+                            if (context.length() != 0){
+                                //try this. skip to where end of this tag is. it's like fast forward
+                                x.skipPast("/"+tagName);
+                                return true; // after concatenating at rec level 0, it's time to return true
+                            }
+                        }
+                        return false;
+                    }
+                }
+            }
+        } else {
+            throw x.syntaxError("Misshaped tag");
+        }
+    }
+}
+}
+
+
+    /**
+     * Find a JSONObject pointed to by a JSONPointer inside a well-formed 
+     * (but not necessarily valid) XML and convert it into JSONObject.
+     * Some information may be lost in this transformation because
+     * JSON is a data format and XML is a document format. XML uses elements,
+     * attributes, and content text, while JSON uses unordered collections of
+     * name/value pairs and arrays of values. JSON does not does not like to
+     * distinguish between elements and attributes. Sequences of similar
+     * elements are represented as JSONArrays. Content text may be placed in a
+     * "content" member. Comments, prologs, DTDs, and <pre>{@code
+     * &lt;[ [ ]]>}</pre>
+     * are ignored.
+     *
+     * All values are converted as strings, for 1, 01, 29.0 will not be coerced to
+     * numbers but will instead be the exact value as seen in the XML document.
+     *
+     * @param reader The XML source reader.
+     * @param path A JSONPointer path, representing the JSONObject to be extracted
+     * from the xml file
+     * @return A JSONObject containing the structured data from the XML file.
+     * @throws JSONException Thrown if there is an errors while parsing the string
+     */
+    public static JSONObject toJSONObject(Reader reader, JSONPointer path) throws JSONException{
+        // reads a xml file tag by tag
+        // keeps going on until finds a tag given by first level of path
+        // keeps going until finds the tag given by last level of path
+        // as soon as the path is completed, the value of that xml tag represents the JSON object to return
+        XMLParserConfiguration config = XMLParserConfiguration.ORIGINAL;
+        List<String> pointerList = new ArrayList<String>();
+        String [] pathStr;
+        if (path.toString().equals("/")){
+            pathStr = new String[0];
+        }else{
+            pathStr = path.toString().split("/");
+        }
+        // path should start with "/"
+        if (pathStr.length >0 && !pathStr[0].equals("")){
+            throw new JSONPointerException("Incorrectly formed JSON Pointer");
+        }
+
+        if (pathStr.length==0){
+            if (!path.toString().equals("/")){
+                throw new JSONPointerException("Incorrectly formed JSON Pointer");
+            }
+        }
+        // start from second string because first should be empty because path should have started with "/"
+        for (int i=1; i<pathStr.length; i++){
+            pointerList.add(pathStr[i]); // add ea
+        }
+
+        JSONObject jo = new JSONObject();
+        XMLTokener x = new XMLTokener(reader);
+        boolean skipSaving = true;
+        int recursionLevel = -1;
+        // keep looking only while jo has nothing in it.
+        // once jo has something, its time to return
+        while (x.more() && jo.length()==0) {
+            x.skipPast("<");
+            if(x.more()) {
+                parsesubObject(x, jo, null, config, pointerList, skipSaving, recursionLevel);
+            }
+        }
+        return jo;
+    }
+
+    /**
+     * This is a parse function that parses an XML string and looks for a subobject pointed to by the list of JSONPointer Strings
+     * pointer. It skips over the name tags which are not equal to the next required named pointer (at the top of the list).
+     * If the found tag is equal to the tag at top of the list then this tag is processed i.e. parse is called on that tag's value.
+     * But if the next pointer is an integer, then we don't call parse again rather skip this tag and decrement next pointer's value by 1
+     * We do this unless next pointer integer is 0 because we have to look for this named tag again (for e.g. if we find tag = book 
+     * and next pointer is 1, then we skip book and decrement 1 to 0 since we are waiting for the next book tag which will have pointer=0)
+     * Don't save into JSONObject if skipSaving is True. This is set true after subObject has been found and saved. Wed don't want
+     * to save any more data.
+     * Recursion level starts with -1 when we haven't found the subObject. It becomes 0 the first time we find the subObject
+     * and keeps increasing by 1 each recursion after that. We reset skipSaving to false by checking when recursionLevel == 0.
+     * @param reader
+     * @param config
+     * @return
+     * @throws JSONException
+     */
+
+private static boolean parsesubObject(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, List<String> pointerList, boolean skipSaving, int recursionLevel)
+    throws JSONException {
+char c;
+int i;
+JSONObject jsonObject = null;
+String string;
+String tagName;
+Object token;
+XMLXsiTypeConverter<?> xmlXsiTypeConverter;
+String topPointer; // pointer token at the top of the pointerList
+List<String> newPointerList; // new pointer list to pass on to the next level of recursion
+
+// Test for and skip past these forms:
+// <!-- ... -->
+// <! ... >
+// <![ ... ]]>
+// <? ... ?>
+// Report errors for these forms:
+// <>
+// <=
+// <<
+
+token = x.nextToken();
+
+// <!
+
+if (token == BANG) {
+    c = x.next();
+    if (c == '-') {
+        if (x.next() == '-') {
+            x.skipPast("-->");
+            return false;
+        }
+        x.back();
+    } else if (c == '[') {
+        token = x.nextToken();
+        if ("CDATA".equals(token)) {
+            if (x.next() == '[') {
+                if (!skipSaving){
+                    string = x.nextCDATA();
+                    if (string.length() > 0) {
+                        context.accumulate(config.getcDataTagName(), string);
+                    }
+                }
+                return false;
+            }
+        }
+        throw x.syntaxError("Expected 'CDATA['");
+    }
+    i = 1;
+    do {
+        token = x.nextMeta();
+        if (token == null) {
+            throw x.syntaxError("Missing '>' after '<!'.");
+        } else if (token == LT) {
+            i += 1;
+        } else if (token == GT) {
+            i -= 1;
+        }
+    } while (i > 0);
+    return false;
+} else if (token == QUEST) {
+
+    // <?
+    x.skipPast("?>");
+    return false;
+} else if (token == SLASH) {
+
+    // Close tag </
+
+    token = x.nextToken();
+    if (name == null) {
+        throw x.syntaxError("Mismatched close tag " + token);
+    }
+    if (!token.equals(name)) {
+        throw x.syntaxError("Mismatched " + name + " and " + token);
+    }
+    if (x.nextToken() != GT) {
+        throw x.syntaxError("Misshaped close tag");
+    }
+    return true;
+
+} else if (token instanceof Character) {
+    throw x.syntaxError("Misshaped tag");
+
+    // Open tag <
+
+} else {
+    tagName = (String) token;
+    token = null;
+    jsonObject = new JSONObject();
+    boolean nilAttributeFound = false;
+    xmlXsiTypeConverter = null;
+    
+    //new logic to check if pointerList has any matches
+    newPointerList = new ArrayList<String>(); // initialize empty new pointer list
+        // copy the modified pointerList to newPointerList
+    newPointerList.addAll(pointerList); 
+
+    if (!newPointerList.isEmpty() && tagName.equals(newPointerList.get(0)))
+    {
+        // we are on the right tag
+        topPointer = newPointerList.get(0);
+        // check case where a next pointer exists that is integer. In this case, don't remove this pointer instead
+        // decrement the next integer pointer and keep looking. Otherwise remove this top pointer
+        if (newPointerList.size()>1 && (newPointerList.get(1).matches("[0-9]+"))){
+            // second pointer is integer. check if it is zero, then we have found the topPointer and the zeroth value
+            // if more than 0, then we keep looking and decrement
+            if (Integer.parseInt(newPointerList.get(1))>0){
+                // decrement my own pointer. newPointer doesen't have a meaning as any downstream recursion is 
+                // useless for us so we don't decrement it.
+                pointerList.set(1,String.valueOf(Integer.parseInt(pointerList.get(1))-1));
+            }// check if integer value is 0 and not negative i.e. the zeroth value hasn't already passed
+            else {
+                //we have found zeroth element of an array with key = topPointer. safe to remove both pointers 
+                // iff we don't have an existing context which would mean we have already found the desired subObject
+                if (context.length()==0){
+                    newPointerList.remove(1); //safe to remove the integer next pointer
+                    newPointerList.remove(0); // safe to remove the top pointer
+                }else{
+                    // we don't have to find another JSONObject as two integer indices cannot occur one after another in xml
+                }
+            }
+        }else{
+            //next pointer is not an integer. can safetly remove the top pointer
+            newPointerList.remove(0); 
+        }
+    }
+
+    // check if pointerList has become empty due to the above code or we inherited it empty
+    if (newPointerList.isEmpty()){
+        //we should start saving the jsonObject from here
+        skipSaving = false;
+        // when the pointerList becomes empty the first time, recursionLevel=0. We will stop saving when we return to 
+        // recursionLevel=0
+        recursionLevel +=1; 
+    }
+
+    for (;;) {
+        if (token == null) {
+            token = x.nextToken();
+        }
+        // attribute = value
+        if (token instanceof String) {
+            string = (String) token;
+            token = x.nextToken();
+            if (token == EQ) {
+                token = x.nextToken();
+                if (!(token instanceof String)) {
+                    throw x.syntaxError("Missing value");
+                }
+
+                if (config.isConvertNilAttributeToNull()
+                        && NULL_ATTR.equals(string)
+                        && Boolean.parseBoolean((String) token)) {
+                    nilAttributeFound = true;
+                } else if(config.getXsiTypeMap() != null && !config.getXsiTypeMap().isEmpty()
+                        && TYPE_ATTR.equals(string)) {
+                    xmlXsiTypeConverter = config.getXsiTypeMap().get(token);
+                } else if (!nilAttributeFound) {
+                    if (!skipSaving){
+                        jsonObject.accumulate(string,
+                        config.isKeepStrings()
+                                ? ((String) token)
+                                : stringToValue((String) token));
+                    }
+                }
+                token = null;
+            } else {
+                if (!skipSaving){
+                    jsonObject.accumulate(string, "");
+                }
+            }
+
+
+        } else if (token == SLASH) {
+            // Empty tag <.../>
+            if (x.nextToken() != GT) {
+                throw x.syntaxError("Misshaped tag");
+            }
+            if (!skipSaving){
+                if (nilAttributeFound) {
+                    context.accumulate(tagName, JSONObject.NULL);
+                } else if (jsonObject.length() > 0) {
+                    context.accumulate(tagName, jsonObject);
+                } else {
+                    context.accumulate(tagName, "");
+                }    
+            }else{
+                // do nothing. pointerList not yet empty
+            }
+            return false;
+
+        } else if (token == GT) {
+            // Content, between <...> and </...>
+            for (;;) {
+                token = x.nextContent();
+                if (token == null) {
+                    if (tagName != null) {
+                        throw x.syntaxError("Unclosed tag " + tagName);
+                    }
+                    return false;
+                } else if (token instanceof String) {
+                    string = (String) token;
+                    // if pointerList is empty, then only add to json otherwise skip adding, we're not 
+                    // at the desired subObject yet
+                    if (!skipSaving){
+                        if (string.length() > 0) {
+                            if(xmlXsiTypeConverter != null) {
+                                jsonObject.accumulate(config.getcDataTagName(),
+                                        stringToValue(string, xmlXsiTypeConverter));
+                            } else {
+                                jsonObject.accumulate(config.getcDataTagName(),
+                                        config.isKeepStrings() ? string : stringToValue(string));
+                            }
+                        }
+                    }else{
+                        // still not found desired subObject. Let the loop continue and finish this tag
+                    }
+                } else if (token == LT) {
+                    // Nested element
+                    // call with updated newPointerList. This way on returning we maintain the original pointerList
+                    if (parsesubObject(x, jsonObject, tagName, config, newPointerList, skipSaving, recursionLevel)) {
+                        // Either the pointerList  or while we are still building the subObject,
+                        // keep returning up the recursion
+                        if (pointerList.isEmpty() && recursionLevel>=0){
+                            if (jsonObject.length() == 0) {
+                                context.accumulate(tagName, "");
+                            } else if (jsonObject.length() == 1
+                                    && jsonObject.opt(config.getcDataTagName()) != null) {
+                                context.accumulate(tagName, jsonObject.opt(config.getcDataTagName()));
+                            } else {
+                                context.accumulate(tagName, jsonObject);
+                            }
+                            // once skipSaving is off, we will keep returning true for all above recursion levels
+                            // to signal end of tag
+                            if (recursionLevel ==0 || recursionLevel ==-1){
+                                 // don't stop saving since transferring from jsonObject to context is the way object
+                                 // is transferred across recursions. So once started saving, keep saving. Just
+                                 // return true from now
+                                // also time to return true now so that upper recursion can stop adding new elements
+                                // returning true signals the end of a tag
+                                return true;
+                            }    
+                            
+                        }else{
+                            // let's try if this works. I want upstream context to just pass through the underlying jsonObject
+                            // because  I don't want any more tags be added.
+                            // I'll try to copy jsonObject into context
+                            Iterator<String> it = jsonObject.keys();
+                            context.clear(); // clear anything in context
+                            while (it.hasNext()){
+                                String key = it.next();
+                                context.put(key, jsonObject.get(key));
+                            }
+                            // if you have data in context, and you're not in recursion >0 then you can go forward
+                            if (context.length() != 0){
+                                //try this. skip to where end of this tag is. it's like fast forward
+                                x.skipPast("/"+tagName);
+                                return true; // after concatenating at rec level 0, it's time to return true
+                            }
+                        }
+                        return false;
+                    }
+                }
+            }
+        } else {
+            throw x.syntaxError("Misshaped tag");
+        }
+    }
+}
+}
+
 
     /**
      * Convert a well-formed (but not necessarily valid) XML into a
