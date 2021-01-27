@@ -23,6 +23,11 @@ method for its job.
 Testing code added:
 * Two new files have been added XMLSubObjectBasicTest.java, XMLSubObjectAdvancedTest.java.
 
+PErformance optimizations done:
+* parsesubObject() recursively looks for the subObject desired. Once it finds the subObject, it does not parse the XML file further and 
+skips the Reader to the end of XML tags and eventually returns.
+* parseReplaceSubObject() recursively looks for the object to be replaced. On finding the desired subObject, it does not parse that object but rather skips to the end of that object's location. This is another performance optimization.
+
 Steps to build:
 * Do .\gradlew.bat build in the JSON-java folder on your windows machine
 * jar file is created inside JSON-java\build\libs folder. You can use this jar file to run any code.
