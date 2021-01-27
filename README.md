@@ -4,8 +4,42 @@ JSON in Java [package org.json]
 [![Maven Central](https://img.shields.io/maven-central/v/org.json/json.svg)](https://mvnrepository.com/artifact/org.json/json)
 
 **[Click here if you just want the latest release jar file.](https://repo1.maven.org/maven2/org/json/json/20201115/json-20201115.jar)**
-Latst code Updates:
-Two New Files:
+
+
+# Latst code Updates:
+Two new public functions have been added in XML.java
+* static JSONObject toJSONObject(Reader reader, JSONPointer path) 
+* static JSONObject toJSONObject(Reader reader, JSONPointer path, JSONObject replacement) 
+
+Two new private functions have been added in XML.java
+*  private static boolean parseReplaceSubObject(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, List<String> pointerList, boolean [] foundObj, int recursionLevel, JSONObject replacement) throws JSONException
+* private static boolean parsesubObject(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, List<String> pointerList, boolean skipSaving, int recursionLevel) throws JSONException
+
+Explanation of code flow:
+* The toJSONObject() method responsible for finding and returning a JSONObject corresponding to a JSONPointer calls the parsesubObject()
+method for its job. 
+* The toJSONObject() method responsible for finding and replacing a JSONObject corresponding to a JSONPointer and returning the complete XML file as a JSONObject  calls the parseReplaceSubObject() method for its job. 
+
+Testing code added:
+* Two new files have been added XMLSubObjectBasicTest.java, XMLSubObjectAdvancedTest.java.
+
+Steps to build:
+* Do .\gradlew.bat build in the JSON-java folder on your windows machine
+* jar file is created inside JSON-java\build\libs folder. You can use this jar file to run any code.
+
+More information about the two functions behaviour:
+* static JSONObject toJSONObject(Reader reader, JSONPointer path) 
+1. If a JSONPointer points to a path in XML file that does not exist, then an empty JSONObject {} is returned.
+2. If the JSONPointer points to a JSONArray, then the method behaviour is not specified. It may return the first element of the array as a JSONObject.
+3. If the JSONPointer includes an index such as 0, then the first occurence of the tag preceding 0, is taken as the zeroth element of a JSONArray and the method tries to return it value as a JSONObject. For e.g., for books.xml if you specify JSONPointer path = "/catalog/0", then the method will only read the first occurence of <catalog> tag and return its value. It will not check whether occurences of <catalog> occur at the same level or not (i.e., whether "catalog" key really points to a JSONArray or not).
+4. If the JSONPointer points to an object which is neither a JSONObject nor a JSONArray, then the behaviour of the method is undefined. The method may return a JSONObject with the key="content" and value=object.
+
+* static JSONObject toJSONObject(Reader reader, JSONPointer path, JSONObject replacement) 
+1. If the JSONPointer points to a valid JSONObject, this object is replaced with replacement and the resulting complete XML file is returned as a JSONObject.
+2. If JSONPointer points to a JSONArray, the behaviour of this method is undefined. It may replace each element of the JSONArray with replacement.
+3. If the JSONPointer points to a set of tags, at least one of which do not exist in the given order, then the behaviour is undefined. The method may not replace anything.
+4. If the JSONPOinter points to a set of tags that are a set of valid tags but really one of the tags is a JSONArray, then the behaviour is undefined. The output may replace all occurences of these set of tags in the XML file. For e.g., if user specifies /catalog/book/price then there are actually two books and user is not specifying which book index. Hence, our method's behaviour is undefined. We may replace both price tags with the same object.
+5. If the JSONPointer points to anything that's not a JSONObject/JSONArray, this value is still replaced with the JSONObject replacement and the resulting XML is returned as a JSONObject
 # Overview
 
 [JSON](http://www.JSON.org/) is a light-weight language-independent data interchange format.
