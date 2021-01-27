@@ -679,22 +679,23 @@ public class XML {
         JSONObject jo = new JSONObject();
         XMLTokener x = new XMLTokener(reader);
         boolean skipSaving = false; // don't skip saving
+        boolean [] foundObj = {false};
         int recursionLevel = -1;
         // keep looking only while jo has nothing in it.
         // once jo has something, its time to return
         while (x.more() && jo.length()==0) {
             x.skipPast("<");
             if(x.more()) {
-                parseReplaceSubObject(x, jo, null, config, pointerList, skipSaving, recursionLevel, replacement);
+                 parseReplaceSubObject(x, jo, null, config, pointerList, foundObj, recursionLevel, replacement);
             }
         }
         return jo;
     }
 
-    /*
-    * parseReplaceSubObject().
-    */
-    private static boolean parseReplaceSubObject(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, List<String> pointerList, boolean skipSaving, int recursionLevel, JSONObject replacement)
+    /**
+     * parseReplaceSubObject().
+     */
+    private static boolean parseReplaceSubObject(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, List<String> pointerList, boolean [] foundObj, int recursionLevel, JSONObject replacement)
     throws JSONException {
 char c;
 int i;
@@ -732,12 +733,10 @@ if (token == BANG) {
         token = x.nextToken();
         if ("CDATA".equals(token)) {
             if (x.next() == '[') {
-                if (!skipSaving){
                     string = x.nextCDATA();
                     if (string.length() > 0) {
                         context.accumulate(config.getcDataTagName(), string);
                     }
-                }
                 return false;
             }
         }
@@ -812,26 +811,34 @@ if (token == BANG) {
                 // useless for us so we don't decrement it.
                 pointerList.set(1,String.valueOf(Integer.parseInt(pointerList.get(1))-1));
             }// check if integer value is 0 and not negative i.e. the zeroth value hasn't already passed
-            else {
-                //we have found zeroth element of an array with key = topPointer. safe to remove both pointers 
-                // iff we don't have an existing context which would mean we have already found the desired subObject
-                if (context.length()==0){
+            else if (Integer.parseInt(newPointerList.get(1))==0){
+                // remove pointers from the list only if we have reached "/tag/0"
                     newPointerList.remove(1); //safe to remove the integer next pointer
                     newPointerList.remove(0); // safe to remove the top pointer
-                }else{
-                    // we don't have to find another JSONObject as two integer indices cannot occur one after another in xml
-                }
+                // we have to make sure we only do this once and not again if the tag's value is an array
+                // so we decrement the next integer to -1 from our original pointerList so the next time
+                // we find the same tagName at this level, we don't recognize it as /tag/0
+                    pointerList.set(1,String.valueOf(Integer.parseInt(pointerList.get(1))-1));
+            }
+            else{
+                // Integer.parseInt(newPointerList.get(1)) is negative. Not interested in replacing this object
             }
         }else{
             //next pointer is not an integer. can safetly remove the top pointer
             newPointerList.remove(0); 
         }
     }
+    else if (!newPointerList.isEmpty() && !tagName.equals(newPointerList.get(0))){
+        // the next pointer does not match the current tag. I should add some impossible key 
+        // to the top of list so that downstream recursions don't end up matching the JSONpointer
+        // this will ensure the recursion returns successfully and I keep searching for the complete
+        // JSONPointer. This prevents "/book/0" from replacing at "/catalog/book/0"
+       
+        newPointerList.add(0, ""); // empty key shouldn't match any tag in xml
+    }
 
     // check if pointerList has become empty due to the above code or we inherited it empty
     if (newPointerList.isEmpty()){
-        //we should start saving the jsonObject from here
-        //skipSaving = false;
         // when the pointerList becomes empty the first time, recursionLevel=0. We will stop saving when we return to 
         // recursionLevel=0
         recursionLevel +=1; 
@@ -859,18 +866,14 @@ if (token == BANG) {
                         && TYPE_ATTR.equals(string)) {
                     xmlXsiTypeConverter = config.getXsiTypeMap().get(token);
                 } else if (!nilAttributeFound) {
-                    if (!skipSaving){
                         jsonObject.accumulate(string,
                         config.isKeepStrings()
                                 ? ((String) token)
                                 : stringToValue((String) token));
-                    }
                 }
                 token = null;
             } else {
-                if (!skipSaving){
                     jsonObject.accumulate(string, "");
-                }
             }
 
 
@@ -879,7 +882,6 @@ if (token == BANG) {
             if (x.nextToken() != GT) {
                 throw x.syntaxError("Misshaped tag");
             }
-            if (!skipSaving){
                 if (nilAttributeFound) {
                     context.accumulate(tagName, JSONObject.NULL);
                 } else if (jsonObject.length() > 0) {
@@ -887,9 +889,6 @@ if (token == BANG) {
                 } else {
                     context.accumulate(tagName, "");
                 }    
-            }else{
-                // do nothing. pointerList not yet empty
-            }
             return false;
 
         } else if (token == GT) {
@@ -905,7 +904,6 @@ if (token == BANG) {
                     string = (String) token;
                     // if pointerList is empty, then only add to json otherwise skip adding, we're not 
                     // at the desired subObject yet
-                    if (!skipSaving){
                         if (string.length() > 0) {
                             if(xmlXsiTypeConverter != null) {
                                 jsonObject.accumulate(config.getcDataTagName(),
@@ -915,9 +913,6 @@ if (token == BANG) {
                                         config.isKeepStrings() ? string : stringToValue(string));
                             }
                         }
-                    }else{
-                        // still not found desired subObject. Let the loop continue and finish this tag
-                    }
                 } else if (token == LT) {
                     // Nested element
 
@@ -936,11 +931,21 @@ if (token == BANG) {
                             return false;
                     }
                     else if (recursionLevel ==0){
-                        jsonObject = replacement;
-                        x.skipPast("/"+tagName+">"); // skip until recursion=0 tag has ended
-                        returnedFlag = true; // okay to save
+                        if (!foundObj[0]){
+                            jsonObject = replacement;
+                            x.skipPast("/"+tagName+">"); // skip until recursion=0 tag has ended
+                            returnedFlag = true; // okay to save    
+                            //also turn on found flag
+                            foundObj[0] = true;
+                        }else{
+                            //object has been previously found. should not come back to recursion =0
+                            // otherwise an array will be built when we want single object
+                            x.skipPast("/"+ tagName+ ">");
+                            returnedFlag = false; // we don't even want empty values accumulated
+                            return false;
+                        }
                     }else{
-                        returnedFlag = parseReplaceSubObject(x, jsonObject, tagName, config, newPointerList, skipSaving, recursionLevel, replacement);
+                        returnedFlag = parseReplaceSubObject(x, jsonObject, tagName, config, newPointerList, foundObj, recursionLevel, replacement);
                     }
                     // call with updated newPointerList. This way on returning we maintain the original pointerList
                     if (returnedFlag) {
@@ -1196,6 +1201,13 @@ if (token == BANG) {
             newPointerList.remove(0); 
         }
     }
+    else if (!newPointerList.isEmpty() && !tagName.equals(newPointerList.get(0))){
+        //tagname does not equal the tag we're looking for. WE can't ignore this otherwise 
+        // /book may match /catalog/book in the nxt level
+        //skip until we get to the end of this tag
+        x.skipPast("</" + tagName + ">");
+        return false; // we ended the newly found tag but not the "name" tag on which we are being called to investigate
+    }
 
     // check if pointerList has become empty due to the above code or we inherited it empty
     if (newPointerList.isEmpty()){
@@ -1291,8 +1303,15 @@ if (token == BANG) {
                     // Nested element
                     // call with updated newPointerList. This way on returning we maintain the original pointerList
                     if (parsesubObject(x, jsonObject, tagName, config, newPointerList, skipSaving, recursionLevel)) {
-                        // Either the pointerList  or while we are still building the subObject,
-                        // keep returning up the recursion
+                        // pointerList empty means we are at inside the correct subObject, so we should 
+                        // accumulate it into context for returning
+                        // ideally the recursionLevel would be 1 or more here because recursionLevel=0 is the level
+                        // at which the last tag is found. Usually for recursionLevel==0, we do not want to include its
+                        // key in the returned jSONObject. 
+                        // BUT, in case we get a call with an empty pointerList right from the start i.e., no JSONPointer, 
+                        // just return the whole XML, then even at recursionLevel=0, we have to include its key.
+                        // Hence the following if condition handles both these concepts with an && condition
+                        // accumulate for returning up the recursion
                         if (pointerList.isEmpty() && recursionLevel>=0){
                             if (jsonObject.length() == 0) {
                                 context.accumulate(tagName, "");
@@ -1305,17 +1324,18 @@ if (token == BANG) {
                             // once skipSaving is off, we will keep returning true for all above recursion levels
                             // to signal end of tag
                             if (recursionLevel ==0 || recursionLevel ==-1){
-                                 // don't stop saving since transferring from jsonObject to context is the way object
-                                 // is transferred across recursions. So once started saving, keep saving. Just
-                                 // return true from now
-                                // also time to return true now so that upper recursion can stop adding new elements
-                                // returning true signals the end of a tag
+                                // also time to return true now since we're back at recursionLevel==0. WE have
+                                // found and filled the subObject. We return true so that upper recursion can stop
+                                // adding new elements. returning true signals the end of a tag
                                 return true;
                             }    
                             
                         }else{
-                            // let's try if this works. I want upstream context to just pass through the underlying jsonObject
-                            // because  I don't want any more tags be added.
+                            // Here, we are either at recursionLevel== -1 i.e., haven't found the subObject, OR
+                            // we are at recursionLevel==0, and we have just found the subObject inside jsonObject.
+                            // In first case, jsonObject is empty so this code does nothing.
+                            // In the second case, I I want upstream context to just pass through the underlying jsonObject
+                            // because  I don't want any more upstream tags be added.
                             // I'll try to copy jsonObject into context
                             Iterator<String> it = jsonObject.keys();
                             context.clear(); // clear anything in context
@@ -1324,9 +1344,10 @@ if (token == BANG) {
                                 context.put(key, jsonObject.get(key));
                             }
                             // if you have data in context, and you're not in recursion >0 then you can go forward
+                            // otherwise you got to keep looking
                             if (context.length() != 0){
-                                //try this. skip to where end of this tag is. it's like fast forward
-                                x.skipPast("/"+tagName);
+                                //skip to where end of this tag is. it's like fast forward
+                                x.skipPast("/"+tagName+">");
                                 return true; // after concatenating at rec level 0, it's time to return true
                             }
                         }

@@ -16,10 +16,10 @@ import org.json.XMLXsiTypeConverter;
 
 
 public class XMLDebug{
-    String xmlStr = "<?xml version=\"1.0\"?>\n"+
+    static String xmlStr = "<?xml version=\"1.0\"?>\n"+
         "<catalog>\n"+
            "<book id=\"bk101\">\n"+
-              "<author>Gambardella, Matthew</author>\n"+
+              "<author><key>Gambardella, Matthew</key> <key>HEllo</key></author>\n"+
               "<title>XML Developer's Guide</title>\n"+
               "<genre>Computer</genre>\n"+
               "<price>44.95</price>\n"+
@@ -45,7 +45,7 @@ public class XMLDebug{
         
         try {
             Reader reader = new StringReader(xmlStr);
-            JSONPointer path = new JSONPointer("/catalog/book/0");
+            JSONPointer path = new JSONPointer("/catalog/book/0/author");
             JSONObject jsonObject = XML.toJSONObject(reader, path);
             System.out.println(jsonObject.toString(4));
         } catch (JSONException e) {
@@ -58,7 +58,7 @@ public class XMLDebug{
         
         try {
             Reader reader = new StringReader(xmlStr);
-            JSONPointer path = new JSONPointer("/catalog/book/0");
+            JSONPointer path = new JSONPointer("/catalog/book/0/author/key");
             JSONObject replacement = new JSONObject();
             replacement.put("newbook", "hemant");
             JSONObject jsonObject = XML.toJSONObject(reader, path, replacement);
@@ -72,6 +72,6 @@ public class XMLDebug{
     public static void main(String [] args){
         XMLDebug debugger = new XMLDebug();
         debugger.debugXMLtoJSON1();
-        debugger.debugXMLtoJSON2();
+     //   debugger.debugXMLtoJSON2();
     }
 }
