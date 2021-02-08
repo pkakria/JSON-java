@@ -19,7 +19,7 @@ public class XMLDebug{
     static String xmlStr = "<?xml version=\"1.0\"?>\n"+
         "<catalog>\n"+
            "<book id=\"bk101\">\n"+
-              "<author><key>Gambardella, Matthew</key> <key>HEllo</key></author>\n"+
+              "<author>Gambardella, Matthew </author>\n"+
               "<title>XML Developer's Guide</title>\n"+
               "<genre>Computer</genre>\n"+
               "<price>44.95</price>\n"+
@@ -69,9 +69,20 @@ public class XMLDebug{
         }
     }
 
+    public void debugXMLtoJSONModule3(){
+        try{
+            Reader reader = new StringReader(xmlStr);
+            String newjostr = XML.toJSONObject(reader, (str)-> "hello_"+str).toString(4);
+            System.out.println(newjostr);
+        }catch(JSONException e){
+            e.printStackTrace();
+        }
+    }
+
     public static void main(String [] args){
         XMLDebug debugger = new XMLDebug();
-        debugger.debugXMLtoJSON1();
+        //debugger.debugXMLtoJSON1();
      //   debugger.debugXMLtoJSON2();
+        debugger.debugXMLtoJSONModule3();
     }
 }

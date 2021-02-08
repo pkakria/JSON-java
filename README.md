@@ -6,7 +6,35 @@ JSON in Java [package org.json]
 **[Click here if you just want the latest release jar file.](https://repo1.maven.org/maven2/org/json/json/20201115/json-20201115.jar)**
 
 
-# Latst code Updates:
+## Latst code Updates:
+# Milestone3
+Newly added methods
+* Added a new public method in XML.java `static JSONObject toJSONObject(Reader reader, Function<String, String> fun)`
+* Added a new private method in XML.java `static boolean parseTransformKey(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, Function<String, String> fun) throws JSONException`
+
+Explanation of newly added methods:
+* The method `toJSONObject(Reader reader, Function<String, String> fun)` allows a client to provide a function that transforms a String key into another String key and returns the XML file as a JSONObject. The `parseTransformKey(...)` method almost replicates the `parse(...)` method in XML.java except that an overall try-catch block has been added and the client supplied function is applied on the key before accumulating it to the JSONObject.
+
+Testing code added: 
+* Added a new file XMLKeyTransformerTest.java in test/java/org/json/junit that tests for different corner cases, exception handling, and correct operation of the newly added methods.
+
+Performance Improvements Versus Milestone 1
+* Adding prefix to keys is much faster when done inside the library compared to when done outside the library. 
+For e.g., a comparison of time taken for prefixing all keys of books.xml with "swe262_", using milestone 1 method outside the library and milestone 3 method inside the library is shown in Table I. 
+* The reason for this is that converting XML to JSON object takes a long time and is the bottleneck. Outside the library, an XML must first be converted to a JSONObject and then it's keys are prefixed iteratively.
+Inside the library, the JSONObject can be constructed with prefixed keys from the start itself. We measured the time to construct a JSONObject from XML for books.xml to be **47.2 msec** on average (over 10 runs). Hence, doing prefixing outside the library incurs this much overhead compared to prefixing inside the library. 
+
+Table I: Time to transform keys of books.XML
+|Using Method | Time to Run (msec)|
+|-------------| -----------|
+|Outside Library | **50.7**|
+|Library method| **5.6**|
+
+Build Script
+* Do `.\gradlew.bat build` in the JSON-java folder on your windows machine
+* jar file is created inside JSON-java\build\libs folder. You can use this jar file to run any code.
+
+# Milestone2
 Two new public functions have been added in XML.java
 * static JSONObject toJSONObject(Reader reader, JSONPointer path) 
 * static JSONObject toJSONObject(Reader reader, JSONPointer path, JSONObject replacement) 

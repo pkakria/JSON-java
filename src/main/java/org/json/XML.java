@@ -34,6 +34,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.Function;
 
 
 /**
@@ -694,6 +695,8 @@ public class XML {
 
     /**
      * parseReplaceSubObject().
+     * This method finds and replaces a subObject inside the XML with the supplied replacement JSONObject. It returns the 
+     * resultant XML as a JSONObject
      */
     private static boolean parseReplaceSubObject(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, List<String> pointerList, boolean [] foundObj, int recursionLevel, JSONObject replacement)
     throws JSONException {
@@ -992,6 +995,226 @@ if (token == BANG) {
 
 
     /**
+     * Scan the content following the named tag, attaching it to the context. Transform each key with client provided function fun.
+     * fun may be an arbitrary function of type Function(String, String)
+     *
+     * @param x
+     *            The XMLTokener containing the source string.
+     * @param context
+     *            The JSONObject that will include the new material.
+     * @param name
+     *            The tag name.
+     * @param fun
+     *            The function which transforms the keys/tags
+     * @return true if the close tag is processed.
+     * @throws JSONException
+     */
+    private static boolean parseTransformKey(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, Function<String, String> fun)
+            throws JSONException {
+                try{
+                    char c;
+                    int i;
+                    JSONObject jsonObject = null;
+                    String string;
+                    String tagName;
+                    Object token;
+                    XMLXsiTypeConverter<?> xmlXsiTypeConverter;
+            
+                    // Test for and skip past these forms:
+                    // <!-- ... -->
+                    // <! ... >
+                    // <![ ... ]]>
+                    // <? ... ?>
+                    // Report errors for these forms:
+                    // <>
+                    // <=
+                    // <<
+            
+                    token = x.nextToken();
+            
+                    // <!
+            
+                    if (token == BANG) {
+                        c = x.next();
+                        if (c == '-') {
+                            if (x.next() == '-') {
+                                x.skipPast("-->");
+                                return false;
+                            }
+                            x.back();
+                        } else if (c == '[') {
+                            token = x.nextToken();
+                            if ("CDATA".equals(token)) {
+                                if (x.next() == '[') {
+                                    string = x.nextCDATA();
+                                    if (string.length() > 0) {
+                                        context.accumulate(config.getcDataTagName(), string);
+                                    }
+                                    return false;
+                                }
+                            }
+                            throw x.syntaxError("Expected 'CDATA['");
+                        }
+                        i = 1;
+                        do {
+                            token = x.nextMeta();
+                            if (token == null) {
+                                throw x.syntaxError("Missing '>' after '<!'.");
+                            } else if (token == LT) {
+                                i += 1;
+                            } else if (token == GT) {
+                                i -= 1;
+                            }
+                        } while (i > 0);
+                        return false;
+                    } else if (token == QUEST) {
+            
+                        // <?
+                        x.skipPast("?>");
+                        return false;
+                    } else if (token == SLASH) {
+            
+                        // Close tag </
+            
+                        token = x.nextToken();
+                        if (name == null) {
+                            throw x.syntaxError("Mismatched close tag " + token);
+                        }
+                        if (!token.equals(name)) {
+                            throw x.syntaxError("Mismatched " + name + " and " + token);
+                        }
+                        if (x.nextToken() != GT) {
+                            throw x.syntaxError("Misshaped close tag");
+                        }
+                        return true;
+            
+                    } else if (token instanceof Character) {
+                        throw x.syntaxError("Misshaped tag");
+            
+                        // Open tag <
+            
+                    } else {
+                        tagName = (String) token;
+                        token = null;
+                        jsonObject = new JSONObject();
+                        boolean nilAttributeFound = false;
+                        xmlXsiTypeConverter = null;
+                        for (;;) {
+                            if (token == null) {
+                                token = x.nextToken();
+                            }
+                            // attribute = value
+                            if (token instanceof String) {
+                                string = (String) token;
+                                token = x.nextToken();
+                                if (token == EQ) {
+                                    token = x.nextToken();
+                                    if (!(token instanceof String)) {
+                                        throw x.syntaxError("Missing value");
+                                    }
+            
+                                    if (config.isConvertNilAttributeToNull()
+                                            && NULL_ATTR.equals(string)
+                                            && Boolean.parseBoolean((String) token)) {
+                                        nilAttributeFound = true;
+                                    } else if(config.getXsiTypeMap() != null && !config.getXsiTypeMap().isEmpty()
+                                            && TYPE_ATTR.equals(string)) {
+                                        xmlXsiTypeConverter = config.getXsiTypeMap().get(token);
+                                    } else if (!nilAttributeFound) {
+                                        jsonObject.accumulate(fun.apply(string),
+                                                config.isKeepStrings()
+                                                        ? ((String) token)
+                                                        : stringToValue((String) token));
+                                    }
+                                    token = null;
+                                } else {
+                                    jsonObject.accumulate(fun.apply(string), "");
+                                }
+            
+            
+                            } else if (token == SLASH) {
+                                // Empty tag <.../>
+                                if (x.nextToken() != GT) {
+                                    throw x.syntaxError("Misshaped tag");
+                                }
+                                if (nilAttributeFound) {
+                                    context.accumulate(fun.apply(tagName), JSONObject.NULL);
+                                } else if (jsonObject.length() > 0) {
+                                    context.accumulate(fun.apply(tagName), jsonObject);
+                                } else {
+                                    context.accumulate(fun.apply(tagName), "");
+                                }
+                                return false;
+            
+                            } else if (token == GT) {
+                                // Content, between <...> and </...>
+                                for (;;) {
+                                    token = x.nextContent();
+                                    if (token == null) {
+                                        if (tagName != null) {
+                                            throw x.syntaxError("Unclosed tag " + tagName);
+                                        }
+                                        return false;
+                                    } else if (token instanceof String) {
+                                        string = (String) token;
+                                        if (string.length() > 0) {
+                                            if(xmlXsiTypeConverter != null) {
+                                                jsonObject.accumulate(config.getcDataTagName(),
+                                                        stringToValue(string, xmlXsiTypeConverter));
+                                            } else {
+                                                jsonObject.accumulate(config.getcDataTagName(),
+                                                        config.isKeepStrings() ? string : stringToValue(string));
+                                            }
+                                        }
+            
+                                    } else if (token == LT) {
+                                        // Nested element
+                                        if (parseTransformKey(x, jsonObject, tagName, config, fun)) {
+                                            if (jsonObject.length() == 0) {
+                                                context.accumulate(fun.apply(tagName), "");
+                                            } else if (jsonObject.length() == 1
+                                                    && jsonObject.opt(config.getcDataTagName()) != null) {
+                                                context.accumulate(fun.apply(tagName), jsonObject.opt(config.getcDataTagName()));
+                                            } else {
+                                                context.accumulate(fun.apply(tagName), jsonObject);
+                                            }
+                                            return false;
+                                        }
+                                    }
+                                }
+                            } else {
+                                throw x.syntaxError("Misshaped tag");
+                            }
+                        }
+                    }
+                }catch(Exception e){
+                    //exception can be of any type e.g., java.lang.NullPointerException or ClassCastException
+                    throw new JSONException(e.getMessage());
+                }
+ 
+    }
+    /**
+     * This method transforms all tags of XML with a client supplied function and returns
+     * the resultant XML as a JSONObject
+     * @param reader The XML source reader
+     * @param fun The function to transform key of the type Function(String, String)
+     * @return JSONObject with keys transformed with function fun
+     */
+    public static JSONObject toJSONObject(Reader reader, Function<String, String> fun){
+     XMLTokener x = new XMLTokener(reader);
+     JSONObject jo = new JSONObject();
+     XMLParserConfiguration config = XMLParserConfiguration.ORIGINAL;
+
+     while (x.more()) {
+        x.skipPast("<");
+        if(x.more()) {
+            parseTransformKey(x, jo, null, config, fun);
+        }
+    }
+    return jo;
+    }
+
+    /**
      * Find a JSONObject pointed to by a JSONPointer inside a well-formed 
      * (but not necessarily valid) XML and convert it into JSONObject.
      * Some information may be lost in this transformation because
@@ -1067,9 +1290,14 @@ if (token == BANG) {
      * to save any more data.
      * Recursion level starts with -1 when we haven't found the subObject. It becomes 0 the first time we find the subObject
      * and keeps increasing by 1 each recursion after that. We reset skipSaving to false by checking when recursionLevel == 0.
-     * @param reader
-     * @param config
-     * @return
+     * @param x XMLTokener
+     * @param config XMLParserConfiguration
+     * @param context initial JSONObject
+     * @param name name of the tag which called this parsesubObject method
+     * @param pointerList list of strings that are keys in the supplied JSONPointer path
+     * @param skipSaving when true, method does not save the read XML code into JSON 
+     * @param recursionLevel recursionLevel>=0 denotes we are inside the desired subObject. recursionLevel=-1 denotes we are outside the subObject
+     * @return True when tag finishes
      * @throws JSONException
      */
 
