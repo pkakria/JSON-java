@@ -9,14 +9,14 @@ JSON in Java [package org.json]
 ## Latst code Updates:
 # Milestone3
 Newly added methods
-* Added a new public method in XML.java `static JSONObject toJSONObject(Reader reader, Function<String, String> fun)`
-* Added a new private method in XML.java `static boolean parseTransformKey(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, Function<String, String> fun) throws JSONException`
+* Added a new public method in [XML.java](https://github.com/pkakria/JSON-java/blob/master/src/main/java/org/json/XML.java) `static JSONObject toJSONObject(Reader reader, Function<String, String> fun)`
+* Added a new private method in [XML.java](https://github.com/pkakria/JSON-java/blob/master/src/main/java/org/json/XML.java) `static boolean parseTransformKey(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config, Function<String, String> fun) throws JSONException`
 
 Explanation of newly added methods:
 * The method `toJSONObject(Reader reader, Function<String, String> fun)` allows a client to provide a function that transforms a String key into another String key and returns the XML file as a JSONObject. The `parseTransformKey(...)` method almost replicates the `parse(...)` method in XML.java except that an overall try-catch block has been added and the client supplied function is applied on the key before accumulating it to the JSONObject.
 
 Testing code added: 
-* Added a new file XMLKeyTransformerTest.java in test/java/org/json/junit that tests for different corner cases, exception handling, and correct operation of the newly added methods.
+* Added a new file [XMLKeyTransformerTest.java](https://github.com/pkakria/JSON-java/blob/master/src/test/java/org/json/junit/XMLKeyTransformerTest.java) in test/java/org/json/junit that tests for different corner cases, exception handling, and correct operation of the newly added methods.
 
 Performance Improvements Versus Milestone 1
 * Adding prefix to keys is much faster when done inside the library compared to when done outside the library. 
