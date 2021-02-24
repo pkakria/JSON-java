@@ -36,16 +36,19 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.ResourceBundle;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * A JSONObject is an unordered collection of name/value pairs. Its external
@@ -2611,6 +2614,62 @@ public class JSONObject {
             results.put(entry.getKey(), value);
         }
         return results;
+    }
+
+    /**
+     * 
+     * @param key
+     * @param valueType
+     * @param cause
+     * @return Stream<JSONNode>
+     */
+    public Stream<JSONNode> toStream(){
+        List<JSONPointer> traversalQueue = new ArrayList<JSONPointer>();
+        List<JSONPointer> streamingQueue = new ArrayList<>();
+        Set<String> childKeys;
+        // add top level complete JSONObject
+        traversalQueue.add(new JSONPointer(""));
+        streamingQueue.add(new JSONPointer(""));
+
+        while (!traversalQueue.isEmpty()){
+            JSONPointer pointer = traversalQueue.remove(0);
+            // add to streaming queue
+            Object value = this.query(pointer);
+            if (value == null || value.equals(NULL)){
+                // nothing to add
+            }else if (value instanceof String){
+                // no children to add
+            }else if (value instanceof Boolean){
+                // no children to add
+            }else if (value instanceof Number){
+                // no children to add
+            }else if (value instanceof BigDecimal){
+                //no children to add
+            }else if (value instanceof BigInteger){
+                // no children to add
+            }else if (value instanceof JSONObject){
+                // add all keys to be explored to the traversal and streaming queues
+                childKeys = ((JSONObject)value).keySet();
+                for (String key: childKeys){
+                    //JSONPointer newpointer = JSONPointer.builder().append(pointer.toString()).append(key).build();
+                    JSONPointer newpointer = new JSONPointer(pointer.toString()+ "/" + key);
+                    traversalQueue.add(newpointer);
+                    streamingQueue.add(newpointer);
+                }
+            }else if (value instanceof JSONArray){
+                // add all indices to be explored e.g., /0, /1, ... to the traversal and streaming queues
+                for (int index=0; index<((JSONArray)value).length(); index++){
+                    //JSONPointer newpointer = JSONPointer.builder().append(pointer.toString()).append(index).build();
+                    JSONPointer newpointer = new JSONPointer(pointer.toString()+"/"+String.valueOf(index));
+                    traversalQueue.add(newpointer);
+                    streamingQueue.add(newpointer);
+                }
+            }else{
+                throw new JSONException("not expecting this value type in streaming");
+            }
+        }
+
+        return streamingQueue.stream().map((pointer)-> new JSONNode(pointer, query(pointer)));
     }
     
     /**

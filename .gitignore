@@ -5,6 +5,8 @@
 .idea
 *.iml
 /target/
+# ignore VSCode environment
+.vscode/settings.json
 
 /bin/
 build

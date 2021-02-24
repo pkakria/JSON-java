@@ -7,6 +7,23 @@ JSON in Java [package org.json]
 
 
 ## Latst code Updates:
+# Milestone4
+Newly added methods
+* Added a new public method in JSONObject.java `public Stream<JSONNode> toStream()`
+* Added a new file JSONNode.java
+Explanation of the newly added methods
+* The method `toStream()` in `JSONObject` returns a stream of elements inside the `JSONObject` in the form of a `JSONNode`. It returns the elements in a breadth-first manner.
+For e.g., for an XML
+`<greetings>
+<first>"hello"</first>
+<second>"bbye"</second>
+</greetings>`
+
+the method `toStream()` returns four nodes: first node with `path=""` and `value={"greetings":{"first":"hello", "second":"bbye"}}`, second node with `path="/greetings"` and `value=  {"first":"hello", "second":"bbye"}`, third node with `path="/greetings/first"` and `value="hello"`, and fourth node with `path="/greetings/second"` and `value="bbye"`.
+
+Testing code added
+* Added a new file ```JSONObjectStreamingTest.java``` to test toStream() method in JSONObject.
+
 # Milestone3
 Newly added methods
 * Added a new public method in [XML.java](https://github.com/pkakria/JSON-java/blob/master/src/main/java/org/json/XML.java) `static JSONObject toJSONObject(Reader reader, Function<String, String> fun)`

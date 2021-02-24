@@ -79,10 +79,22 @@ public class XMLDebug{
         }
     }
 
+    public void debugJSONStreaming(){
+        try{
+            Reader reader = new StringReader(xmlStr);
+             XML.toJSONObject(reader).toStream().forEach((element)-> {System.out.println(element);
+             System.out.println("---------------------------------------");});
+            //XML.toJSONObject(reader).toStream().filter((node)-> node.path.toString().equals("")).forEach((el)-> {System.out.println(el); System.out.println("------------------");});
+        }catch(JSONException ex){
+            ex.printStackTrace();
+        }
+    }
+
     public static void main(String [] args){
         XMLDebug debugger = new XMLDebug();
         //debugger.debugXMLtoJSON1();
      //   debugger.debugXMLtoJSON2();
-        debugger.debugXMLtoJSONModule3();
+        // debugger.debugXMLtoJSONModule3();
+        debugger.debugJSONStreaming();
     }
 }
