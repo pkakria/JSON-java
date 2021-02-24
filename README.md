@@ -3,8 +3,13 @@ JSON in Java [package org.json]
 
 [![Maven Central](https://img.shields.io/maven-central/v/org.json/json.svg)](https://mvnrepository.com/artifact/org.json/json)
 
-**[Click here if you just want the latest release jar file.](https://repo1.maven.org/maven2/org/json/json/20201115/json-20201115.jar)**
+To build the project run
 
+``` gradlew build```
+
+To create a jar for the project run
+
+```gradlew jar```
 
 ## Latst code Updates:
 # Milestone4
@@ -22,7 +27,7 @@ For e.g., for an XML
 the method `toStream()` returns four nodes: first node with `path=""` and `value={"greetings":{"first":"hello", "second":"bbye"}}`, second node with `path="/greetings"` and `value=  {"first":"hello", "second":"bbye"}`, third node with `path="/greetings/first"` and `value="hello"`, and fourth node with `path="/greetings/second"` and `value="bbye"`.
 
 Testing code added
-* Added a new file ```JSONObjectStreamingTest.java``` to test toStream() method in JSONObject.
+* Added a new file ```JSONObjectStreamingTest.java``` to test the `toStream()` method in JSONObject.
 
 # Milestone3
 Newly added methods
