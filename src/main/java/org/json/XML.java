@@ -34,6 +34,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Function;
 
 
@@ -80,6 +84,9 @@ public class XML {
     public static final String NULL_ATTR = "xsi:nil";
 
     public static final String TYPE_ATTR = "xsi:type";
+    /**ExecturoService for asynchronous operation */
+    private static final ExecutorService threadPool = Executors.newCachedThreadPool();
+
 
     /**
      * Creates an iterator for navigating Code Points in a string instead of
@@ -629,6 +636,23 @@ public class XML {
             return toJSONObject(reader, XMLParserConfiguration.KEEP_STRINGS);
         }
         return toJSONObject(reader, XMLParserConfiguration.ORIGINAL);
+    }
+
+    /**
+     * Asynchronous method to read a XML object and return a JSON Object
+     * @param reader
+     * @return A Future object that at some point in the future will hold the JSONObject, once its parsing finishes.
+     */
+    public static Future<JSONObject> toFutureJSONObject(Reader reader, boolean keepStrings) throws JSONException{
+        Future<JSONObject> futureJSONObject = threadPool.submit(new Callable<JSONObject>(){
+            public JSONObject call() throws JSONException{
+                JSONObject jo= XML.toJSONObject(reader, keepStrings);
+                return jo;
+            }
+        });
+        //do not shutdown after current task is finished as future calls will not be able to use threadPool.
+        // for performance sake, threadPool will automatically shutdown if unused after 60 seconds.
+        return futureJSONObject;
     }
 /**
      * Find a JSONObject pointed to by a JSONPointer inside a well-formed 

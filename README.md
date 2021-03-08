@@ -12,7 +12,15 @@ To create a jar for the project run
 ```gradlew jar```
 
 ## Latst code Updates:
-# Milestone4
+# Milestone 5
+Newly added methods
+* Added a method in XML.java `public static Future<JSONObject> toFutureJSONObject(Reader reader, boolean keepStrings) throws JSONException`
+Explanation of the newly added methods
+* The method `toFutureJSONObject(.,.)` returns a `Future<JSONObject>` that holds the result of the conversion of an XML string into a `JSONObject`. The computation is done asynchronously in a new cached thread pool which can be reused over multiple method calls to enhance the performance. The user can query the status of the computation by calling the `isDone()` method on the `Future<?>` object. The resulting `JSONObject` can be obtained by calling the `get()` method on the `Future<?>` object, which blocks until the computation is finished.
+
+Testing code added
+* Added a new file `XMLAsynchronousReadingTest.java` that tests the `XML.toFutureJSONObject(Reader r, boolean keepStrings)` method.
+# Milestone 4
 Newly added methods
 * Added a new public method in JSONObject.java `public Stream<JSONNode> toStream()`
 * Added a new file JSONNode.java

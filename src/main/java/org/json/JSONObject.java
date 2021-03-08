@@ -2617,11 +2617,8 @@ public class JSONObject {
     }
 
     /**
-     * 
-     * @param key
-     * @param valueType
-     * @param cause
-     * @return Stream<JSONNode>
+     *
+     * @return Stream of JSONNode
      */
     public Stream<JSONNode> toStream(){
         List<JSONPointer> traversalQueue = new ArrayList<JSONPointer>();
